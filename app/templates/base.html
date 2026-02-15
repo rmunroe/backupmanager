@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Minecraft Backup Manager{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav class="container-fluid">
+        <ul>
+            <li><strong>Minecraft Backup Manager</strong></li>
+        </ul>
+        <ul>
+            {% block nav_right %}
+            <li><a href="/">Servers</a></li>
+            <li>
+                <form action="/logout" method="post" style="margin: 0;">
+                    <button type="submit" class="outline secondary">Logout</button>
+                </form>
+            </li>
+            {% endblock %}
+        </ul>
+    </nav>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="container">
+        <small>Minecraft Backup Manager</small>
+    </footer>
+
+    <script src="/static/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

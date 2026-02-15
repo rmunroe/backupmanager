@@ -1,0 +1,16 @@
+services:
+  backupmanager:
+    build: .
+    container_name: backupmanager
+    restart: unless-stopped
+    ports:
+      - "8080:8000"
+    environment:
+      - APP_PASSWORD=${APP_PASSWORD:-changeme}
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - SERVERS_BASE_PATH=/opt/docker
+    volumes:
+      # Docker socket for container control
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Access to server directories for restore operations
+      - /opt/docker:/opt/docker

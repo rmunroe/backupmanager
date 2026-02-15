@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Servers - Minecraft Backup Manager{% endblock %}
+
+{% block content %}
+<h1>Minecraft Servers</h1>
+
+<div class="grid-servers">
+    {% for server in servers %}
+    <article class="server-card">
+        <header>
+            <hgroup>
+                <h3><a href="/servers/{{ server.name }}">{{ server.name }}</a></h3>
+                <p>
+                    <span class="status-badge status-{{ server.status }}">{{ server.status }}</span>
+                </p>
+            </hgroup>
+        </header>
+
+        <footer>
+            <div class="server-actions" data-server="{{ server.name }}">
+                {% if server.status == 'running' %}
+                <button class="secondary outline btn-stop" onclick="stopServer('{{ server.name }}')">Stop</button>
+                {% else %}
+                <button class="outline btn-start" onclick="startServer('{{ server.name }}')">Start</button>
+                {% endif %}
+                <a href="/servers/{{ server.name }}" role="button" class="outline">Backups</a>
+            </div>
+        </footer>
+    </article>
+    {% else %}
+    <p>No Minecraft servers found.</p>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function startServer(name) {
+    if (!confirm(`Start server "${name}"?`)) return;
+
+    try {
+        const btn = document.querySelector(`[data-server="${name}"] .btn-start`);
+        btn.disabled = true;
+        btn.ariaBusy = true;
+
+        const response = await fetch(`/api/servers/${name}/start`, { method: 'POST' });
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to start server');
+        }
+
+        location.reload();
+    } catch (err) {
+        alert(err.message);
+        location.reload();
+    }
+}
+
+async function stopServer(name) {
+    if (!confirm(`Stop server "${name}"?`)) return;
+
+    try {
+        const btn = document.querySelector(`[data-server="${name}"] .btn-stop`);
+        btn.disabled = true;
+        btn.ariaBusy = true;
+
+        const response = await fetch(`/api/servers/${name}/stop`, { method: 'POST' });
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to stop server');
+        }
+
+        location.reload();
+    } catch (err) {
+        alert(err.message);
+        location.reload();
+    }
+}
+</script>
+{% endblock %}

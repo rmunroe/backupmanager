@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+
+{% block title %}{{ server.name }} - Minecraft Backup Manager{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+    <ul>
+        <li><a href="/">Servers</a></li>
+        <li>{{ server.name }}</li>
+    </ul>
+</nav>
+
+<hgroup>
+    <h1>{{ server.name }}</h1>
+    <p>
+        Status: <span class="status-badge status-{{ server.status }}" id="server-status">{{ server.status }}</span>
+        <span class="server-controls">
+            {% if server.status == 'running' %}
+            <button class="secondary outline small" onclick="stopServer()">Stop</button>
+            {% else %}
+            <button class="outline small" onclick="startServer()">Start</button>
+            {% endif %}
+        </span>
+    </p>
+</hgroup>
+
+<h2>Backups</h2>
+
+{% if backups %}
+<figure>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Size</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for backup in backups %}
+            <tr>
+                <td>{{ backup.datetime.strftime('%Y-%m-%d') }}</td>
+                <td>{{ backup.datetime.strftime('%H:%M:%S') }}</td>
+                <td>{{ backup.size_human }}</td>
+                <td>
+                    <button class="outline small" onclick="confirmRestore('{{ backup.filename }}', '{{ backup.datetime.strftime('%Y-%m-%d %H:%M:%S') }}')">
+                        Restore
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</figure>
+{% else %}
+<p>No backups found for this server.</p>
+{% endif %}
+
+<!-- Restore Confirmation Modal -->
+<dialog id="restore-modal">
+    <article>
+        <header>
+            <h3>Confirm Restore</h3>
+        </header>
+        <p>Are you sure you want to restore <strong>{{ server.name }}</strong> to backup:</p>
+        <p><strong id="restore-backup-name"></strong></p>
+        <p class="warning">This will stop the server, delete all current data, and restore from the selected backup.</p>
+        <footer>
+            <button class="secondary" onclick="closeRestoreModal()">Cancel</button>
+            <button id="confirm-restore-btn" onclick="executeRestore()">Restore</button>
+        </footer>
+    </article>
+</dialog>
+
+<!-- Restore Progress Modal -->
+<dialog id="progress-modal">
+    <article>
+        <header>
+            <h3>Restoring Backup</h3>
+        </header>
+        <div id="progress-content">
+            <progress id="restore-progress" value="0" max="100"></progress>
+            <p id="progress-message">Initializing...</p>
+        </div>
+        <div id="progress-result" style="display: none;">
+            <p id="result-message"></p>
+        </div>
+        <footer id="progress-footer" style="display: none;">
+            <button onclick="closeProgressModal()">Close</button>
+        </footer>
+    </article>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const serverName = '{{ server.name }}';
+let selectedBackup = null;
+
+function confirmRestore(filename, datetime) {
+    selectedBackup = filename;
+    document.getElementById('restore-backup-name').textContent = `${filename} (${datetime})`;
+    document.getElementById('restore-modal').showModal();
+}
+
+function closeRestoreModal() {
+    document.getElementById('restore-modal').close();
+    selectedBackup = null;
+}
+
+function closeProgressModal() {
+    document.getElementById('progress-modal').close();
+    location.reload();
+}
+
+async function executeRestore() {
+    if (!selectedBackup) return;
+
+    closeRestoreModal();
+
+    // Show progress modal
+    const progressModal = document.getElementById('progress-modal');
+    const progressBar = document.getElementById('restore-progress');
+    const progressMessage = document.getElementById('progress-message');
+    const progressContent = document.getElementById('progress-content');
+    const progressResult = document.getElementById('progress-result');
+    const resultMessage = document.getElementById('result-message');
+    const progressFooter = document.getElementById('progress-footer');
+
+    progressContent.style.display = 'block';
+    progressResult.style.display = 'none';
+    progressFooter.style.display = 'none';
+    progressBar.value = 0;
+    progressMessage.textContent = 'Starting restore...';
+    progressModal.showModal();
+
+    try {
+        // Start restore
+        const response = await fetch(`/api/servers/${serverName}/restore`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ backup: selectedBackup })
+        });
+
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to start restore');
+        }
+
+        const { job_id } = await response.json();
+
+        // Connect to WebSocket for progress updates
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/restore/${job_id}`);
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            progressBar.value = data.progress;
+            progressMessage.textContent = data.message;
+
+            if (data.step === 'completed') {
+                progressContent.style.display = 'none';
+                progressResult.style.display = 'block';
+                resultMessage.innerHTML = '<span class="success">Restore completed successfully!</span>';
+                progressFooter.style.display = 'block';
+                ws.close();
+            } else if (data.step === 'failed') {
+                progressContent.style.display = 'none';
+                progressResult.style.display = 'block';
+                resultMessage.innerHTML = `<span class="error">Restore failed: ${data.error || data.message}</span>`;
+                progressFooter.style.display = 'block';
+                ws.close();
+            }
+        };
+
+        ws.onerror = () => {
+            // Fall back to polling
+            pollStatus(job_id);
+        };
+
+        ws.onclose = () => {
+            // If not completed, start polling
+            const currentProgress = progressBar.value;
+            if (currentProgress < 100 && progressContent.style.display !== 'none') {
+                pollStatus(job_id);
+            }
+        };
+
+    } catch (err) {
+        progressContent.style.display = 'none';
+        progressResult.style.display = 'block';
+        resultMessage.innerHTML = `<span class="error">Error: ${err.message}</span>`;
+        progressFooter.style.display = 'block';
+    }
+}
+
+async function pollStatus(jobId) {
+    const progressBar = document.getElementById('restore-progress');
+    const progressMessage = document.getElementById('progress-message');
+    const progressContent = document.getElementById('progress-content');
+    const progressResult = document.getElementById('progress-result');
+    const resultMessage = document.getElementById('result-message');
+    const progressFooter = document.getElementById('progress-footer');
+
+    const poll = async () => {
+        try {
+            const response = await fetch(`/api/restore/${jobId}/status`);
+            if (!response.ok) return;
+
+            const data = await response.json();
+            progressBar.value = data.progress;
+            progressMessage.textContent = data.message;
+
+            if (data.step === 'completed') {
+                progressContent.style.display = 'none';
+                progressResult.style.display = 'block';
+                resultMessage.innerHTML = '<span class="success">Restore completed successfully!</span>';
+                progressFooter.style.display = 'block';
+            } else if (data.step === 'failed') {
+                progressContent.style.display = 'none';
+                progressResult.style.display = 'block';
+                resultMessage.innerHTML = `<span class="error">Restore failed: ${data.error || data.message}</span>`;
+                progressFooter.style.display = 'block';
+            } else {
+                setTimeout(poll, 1000);
+            }
+        } catch (err) {
+            setTimeout(poll, 2000);
+        }
+    };
+
+    poll();
+}
+
+async function startServer() {
+    if (!confirm(`Start server "${serverName}"?`)) return;
+
+    try {
+        const response = await fetch(`/api/servers/${serverName}/start`, { method: 'POST' });
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to start server');
+        }
+        location.reload();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function stopServer() {
+    if (!confirm(`Stop server "${serverName}"?`)) return;
+
+    try {
+        const response = await fetch(`/api/servers/${serverName}/stop`, { method: 'POST' });
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || 'Failed to stop server');
+        }
+        location.reload();
+    } catch (err) {
+        alert(err.message);
+    }
+}
+</script>
+{% endblock %}
