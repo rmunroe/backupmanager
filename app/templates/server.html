@@ -172,10 +172,20 @@ async function pollStatus(jobId) {
 
     const poll = async () => {
         try {
-            const response = await fetch(`/api/restore/${jobId}/status`);
-            if (!response.ok) return;
+            console.log('[Poll] Fetching status for', jobId);
+            const response = await fetch(`/api/restore/${jobId}/status`, {
+                credentials: 'same-origin'
+            });
+            console.log('[Poll] Response status:', response.status);
+
+            if (!response.ok) {
+                console.log('[Poll] Response not ok, retrying...');
+                setTimeout(poll, 1000);
+                return;
+            }
 
             const data = await response.json();
+            console.log('[Poll] Data:', data);
             progressBar.value = data.progress;
             progressMessage.textContent = data.message;
 
@@ -193,6 +203,7 @@ async function pollStatus(jobId) {
                 setTimeout(poll, 1000);
             }
         } catch (err) {
+            console.log('[Poll] Error:', err);
             setTimeout(poll, 2000);
         }
     };
