@@ -75,13 +75,17 @@ class RestoreService:
 
     async def execute_restore(self, job_id: str) -> bool:
         """Execute restore operation asynchronously."""
+        print(f"[RESTORE] Starting execute_restore for job {job_id}", flush=True)
         job = self.jobs.get(job_id)
         if not job:
+            print(f"[RESTORE] Job {job_id} not found!", flush=True)
             return False
 
         server_path = self.base_path / job.server_name
         data_dir = server_path / "data"
         backup_path = server_path / "backups" / job.backup_file
+
+        print(f"[RESTORE] Job {job_id}: server={job.server_name}, backup={backup_path}", flush=True)
 
         try:
             # Step 1: Check container status
