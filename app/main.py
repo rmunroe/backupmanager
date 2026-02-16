@@ -7,10 +7,10 @@ from app.routers import auth, servers, restore
 from app.auth import check_auth
 from app.config import get_settings
 
-# Configure logging
+# Configure logging with thread name for background thread visibility
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(name)s - %(levelname)s - [%(threadName)s] %(message)s"
 )
 logger = logging.getLogger(__name__)
 

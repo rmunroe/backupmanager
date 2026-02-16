@@ -6,6 +6,9 @@ WORKDIR /app
 ARG BUILD_VERSION=dev
 ENV APP_VERSION=${BUILD_VERSION}
 
+# Disable Python output buffering for proper logging in Docker
+ENV PYTHONUNBUFFERED=1
+
 # Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
