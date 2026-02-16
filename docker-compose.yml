@@ -1,6 +1,6 @@
 services:
   backupmanager:
-    build: .
+    image: ghcr.io/rmunroe/backupmanager:latest
     container_name: backupmanager
     restart: unless-stopped
     ports:
