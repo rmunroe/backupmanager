@@ -46,11 +46,13 @@ Replace the manual process of running `restore.sh` scripts with a user-friendly 
 ### Restore Process
 Mirrors the existing `restore.sh` workflow:
 1. Check if container is running (save state)
-2. Stop container if running (60s timeout)
+2. Stop server container if running (60s timeout)
 3. Delete `/opt/docker/{server}/data/` contents
 4. Extract backup tarball to data directory
-5. Restart container only if it was running before
-6. Report progress via WebSocket in real-time
+5. Restart server container only if it was running before
+6. Restart backup container (`{server}-backup`) if it was running
+7. Wait for Minecraft server to be ready (monitors logs for "Done" message)
+8. Report progress via WebSocket in real-time
 
 ### Authentication
 - Single shared password (configured via environment variable)
@@ -123,6 +125,27 @@ Mirrors the existing `restore.sh` workflow:
 
 ## Deployment
 
+### Using Pre-built Image (Recommended)
+
+The application is automatically built and pushed to GitHub Container Registry on every push to `master`.
+
+```yaml
+# docker-compose.yml
+services:
+  backupmanager:
+    image: ghcr.io/rmunroe/backupmanager:latest
+    container_name: backupmanager
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /opt/docker:/opt/docker
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - APP_PASSWORD=${APP_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY}
+```
+
 ### Prerequisites
 - Docker and Docker Compose installed
 - Access to `/opt/docker` directory
@@ -152,6 +175,31 @@ docker compose up -d --build
 
 Open http://your-server:8080 in a browser.
 
+## CI/CD with GitHub Actions
+
+The project includes a GitHub Actions workflow (`.github/workflows/build.yml`) that:
+
+1. Builds the Docker image on every push to `master`
+2. Pushes to GitHub Container Registry (`ghcr.io`)
+3. Tags with `latest` and the commit SHA
+4. Triggers a Portainer webhook for automatic deployment
+
+### Setting up Portainer Auto-Deploy
+
+1. In Portainer, create a stack using "Repository" with your GitHub repo
+2. Enable "GitOps updates" and note the webhook URL
+3. In GitHub repo settings, add a secret named `PORTAINER_WEBHOOK_URL` with the webhook URL
+4. The workflow will trigger Portainer to pull the new image after each successful build
+
+### Version Display
+
+The application displays the build version (Git commit SHA) in the footer. This is passed as a build argument during the Docker build:
+
+```yaml
+build-args: |
+  BUILD_VERSION=${{ github.sha }}
+```
+
 ## Security Considerations
 
 1. **Docker Socket Access** - The container has access to the Docker socket, which provides significant host control. Run only on trusted networks.
@@ -169,9 +217,9 @@ Open http://your-server:8080 in a browser.
 
 ## Current Status
 
-**Status: Complete - Ready for Deployment**
+**Status: Complete - In Production**
 
-### Completed Tasks
+### Completed Features
 - [x] Project structure and configuration
 - [x] Docker service (container start/stop/status)
 - [x] Server discovery service
@@ -185,6 +233,11 @@ Open http://your-server:8080 in a browser.
 - [x] Polling fallback for progress
 - [x] Dockerfile and docker-compose.yml
 - [x] CSS styling with Pico CSS
+- [x] GitHub Actions CI/CD pipeline
+- [x] Auto-deploy via Portainer webhook
+- [x] Version display in footer
+- [x] Backup container restart after restore
+- [x] Minecraft server ready detection
 
 ### Future Enhancements (Not Implemented)
 - [ ] Pre-restore backup creation (safety snapshot)
