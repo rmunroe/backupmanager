@@ -140,7 +140,8 @@ async function executeRestore() {
         const response = await fetch(`/api/servers/${serverName}/restore`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ backup: selectedBackup })
+            body: JSON.stringify({ backup: selectedBackup }),
+            credentials: 'same-origin'
         });
 
         const data = await response.json();
