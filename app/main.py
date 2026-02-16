@@ -34,6 +34,10 @@ async def auth_middleware(request: Request, call_next):
     # Allow login page, static files, health check, and API endpoints (which have their own auth)
     if path.startswith("/login") or path.startswith("/static") or path == "/health":
         response = await call_next(request)
+        # Disable caching
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
         logger.info(f"Request finished: {request.method} {path} - {time.time() - start_time:.2f}s")
         return response
 
@@ -43,6 +47,10 @@ async def auth_middleware(request: Request, call_next):
             return RedirectResponse(url="/login", status_code=302)
 
     response = await call_next(request)
+    # Disable caching
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     logger.info(f"Request finished: {request.method} {path} - {time.time() - start_time:.2f}s")
     return response
 
