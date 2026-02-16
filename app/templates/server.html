@@ -117,6 +117,7 @@ function closeProgressModal() {
 async function executeRestore() {
     if (!selectedBackup) return;
 
+    const backupToRestore = selectedBackup;
     closeRestoreModal();
 
     // Show progress modal
@@ -140,7 +141,7 @@ async function executeRestore() {
         const response = await fetch(`/api/servers/${serverName}/restore`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ backup: selectedBackup }),
+            body: JSON.stringify({ backup: backupToRestore }),
             credentials: 'same-origin'
         });
 
