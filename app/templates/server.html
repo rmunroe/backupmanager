@@ -162,7 +162,9 @@ async function executeRestore() {
     }
 }
 
-async function pollStatus(jobId) {
+function pollStatus(jobId) {
+    console.log('[Poll] Starting polling for job:', jobId);
+
     const progressBar = document.getElementById('restore-progress');
     const progressMessage = document.getElementById('progress-message');
     const progressContent = document.getElementById('progress-content');
@@ -170,43 +172,47 @@ async function pollStatus(jobId) {
     const resultMessage = document.getElementById('result-message');
     const progressFooter = document.getElementById('progress-footer');
 
-    const poll = async () => {
-        try {
-            console.log('[Poll] Fetching status for', jobId);
-            const response = await fetch(`/api/restore/${jobId}/status`, {
-                credentials: 'same-origin'
+    function poll() {
+        console.log('[Poll] Polling...', jobId);
+        fetch(`/api/restore/${jobId}/status`, { credentials: 'same-origin' })
+            .then(response => {
+                console.log('[Poll] Response status:', response.status);
+                if (!response.ok) {
+                    console.log('[Poll] Response not ok, retrying in 1s...');
+                    setTimeout(poll, 1000);
+                    return null;
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (!data) return;
+
+                console.log('[Poll] Data:', data.step, data.progress, data.message);
+                progressBar.value = data.progress;
+                progressMessage.textContent = data.message;
+
+                if (data.step === 'completed') {
+                    console.log('[Poll] Completed!');
+                    progressContent.style.display = 'none';
+                    progressResult.style.display = 'block';
+                    resultMessage.innerHTML = '<span class="success">Restore completed successfully!</span>';
+                    progressFooter.style.display = 'block';
+                } else if (data.step === 'failed') {
+                    console.log('[Poll] Failed!');
+                    progressContent.style.display = 'none';
+                    progressResult.style.display = 'block';
+                    resultMessage.innerHTML = `<span class="error">Restore failed: ${data.error || data.message}</span>`;
+                    progressFooter.style.display = 'block';
+                } else {
+                    console.log('[Poll] Scheduling next poll in 1s...');
+                    setTimeout(poll, 1000);
+                }
+            })
+            .catch(err => {
+                console.log('[Poll] Error:', err);
+                setTimeout(poll, 2000);
             });
-            console.log('[Poll] Response status:', response.status);
-
-            if (!response.ok) {
-                console.log('[Poll] Response not ok, retrying...');
-                setTimeout(poll, 1000);
-                return;
-            }
-
-            const data = await response.json();
-            console.log('[Poll] Data:', data);
-            progressBar.value = data.progress;
-            progressMessage.textContent = data.message;
-
-            if (data.step === 'completed') {
-                progressContent.style.display = 'none';
-                progressResult.style.display = 'block';
-                resultMessage.innerHTML = '<span class="success">Restore completed successfully!</span>';
-                progressFooter.style.display = 'block';
-            } else if (data.step === 'failed') {
-                progressContent.style.display = 'none';
-                progressResult.style.display = 'block';
-                resultMessage.innerHTML = `<span class="error">Restore failed: ${data.error || data.message}</span>`;
-                progressFooter.style.display = 'block';
-            } else {
-                setTimeout(poll, 1000);
-            }
-        } catch (err) {
-            console.log('[Poll] Error:', err);
-            setTimeout(poll, 2000);
-        }
-    };
+    }
 
     poll();
 }
