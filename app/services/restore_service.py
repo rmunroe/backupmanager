@@ -33,6 +33,7 @@ class RestoreJob:
     started_at: datetime = field(default_factory=datetime.now)
     completed_at: datetime | None = None
     container_was_running: bool = False
+    backup_container_was_running: bool = False
 
 
 class RestoreService:
@@ -84,14 +85,19 @@ class RestoreService:
                 job, RestoreStep.STOPPING, 5, "Checking container status..."
             )
 
+            backup_container_name = f"{job.server_name}-backup"
+
             is_running = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: self.docker.is_running(job.server_name)
+            )
+            backup_is_running = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: self.docker.is_running(backup_container_name)
             )
 
             if is_running:
                 job.container_was_running = True
                 await self._update_job(
-                    job, RestoreStep.STOPPING, 10, "Stopping container..."
+                    job, RestoreStep.STOPPING, 10, "Stopping server container..."
                 )
 
                 success, msg = await asyncio.get_event_loop().run_in_executor(
@@ -102,13 +108,16 @@ class RestoreService:
                     raise Exception(f"Failed to stop container: {msg}")
 
                 await self._update_job(
-                    job, RestoreStep.STOPPING, 25, "Container stopped"
+                    job, RestoreStep.STOPPING, 20, "Server container stopped"
                 )
             else:
                 job.container_was_running = False
                 await self._update_job(
-                    job, RestoreStep.STOPPING, 25, "Container not running"
+                    job, RestoreStep.STOPPING, 20, "Server container not running"
                 )
+
+            # Also track backup container state
+            job.backup_container_was_running = backup_is_running
 
             # Step 2: Clear data directory
             await self._update_job(
@@ -140,10 +149,10 @@ class RestoreService:
                 job, RestoreStep.EXTRACTING, 85, "Backup extracted"
             )
 
-            # Step 4: Restart container if it was running
+            # Step 4: Restart containers if they were running
             if job.container_was_running:
                 await self._update_job(
-                    job, RestoreStep.STARTING, 90, "Starting container..."
+                    job, RestoreStep.STARTING, 87, "Starting server container..."
                 )
 
                 success, msg = await asyncio.get_event_loop().run_in_executor(
@@ -154,12 +163,32 @@ class RestoreService:
                     raise Exception(f"Failed to start container: {msg}")
 
                 await self._update_job(
-                    job, RestoreStep.STARTING, 95, "Container started"
+                    job, RestoreStep.STARTING, 92, "Server container started"
                 )
             else:
                 await self._update_job(
-                    job, RestoreStep.STARTING, 95, "Container left stopped (was not running before)"
+                    job, RestoreStep.STARTING, 92, "Server container left stopped (was not running before)"
                 )
+
+            # Restart backup container if it was running
+            if job.backup_container_was_running:
+                await self._update_job(
+                    job, RestoreStep.STARTING, 95, "Restarting backup container..."
+                )
+
+                success, msg = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self.docker.restart_container(backup_container_name)
+                )
+
+                if not success:
+                    # Non-fatal - just log it in the message
+                    await self._update_job(
+                        job, RestoreStep.STARTING, 98, f"Warning: Could not restart backup container: {msg}"
+                    )
+                else:
+                    await self._update_job(
+                        job, RestoreStep.STARTING, 98, "Backup container restarted"
+                    )
 
             # Complete
             job.completed_at = datetime.now()

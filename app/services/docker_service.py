@@ -59,6 +59,17 @@ class DockerService:
         except APIError as e:
             return False, f"API error: {str(e)}"
 
+    def restart_container(self, name: str, timeout: int = 30) -> tuple[bool, str]:
+        """Restart a container. Returns (success, message)."""
+        try:
+            container = self.client.containers.get(name)
+            container.restart(timeout=timeout)
+            return True, "Container restarted"
+        except NotFound:
+            return False, "Container not found"
+        except APIError as e:
+            return False, f"API error: {str(e)}"
+
     def is_running(self, name: str) -> bool:
         """Check if a container is running."""
         status = self.get_container_status(name)
