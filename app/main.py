@@ -20,8 +20,8 @@ async def auth_middleware(request: Request, call_next):
     """Redirect to login if not authenticated (except for login page and static files)."""
     path = request.url.path
 
-    # Allow login page, static files, and API endpoints (which have their own auth)
-    if path.startswith("/login") or path.startswith("/static"):
+    # Allow login page, static files, health check, and API endpoints (which have their own auth)
+    if path.startswith("/login") or path.startswith("/static") or path == "/health":
         return await call_next(request)
 
     # Check auth for HTML pages
