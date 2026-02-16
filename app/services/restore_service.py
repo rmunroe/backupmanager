@@ -2,6 +2,7 @@ import asyncio
 import uuid
 import shutil
 import tarfile
+import logging
 from pathlib import Path
 from datetime import datetime
 from enum import Enum
@@ -9,6 +10,8 @@ from typing import Dict, Callable, Awaitable
 from dataclasses import dataclass, field
 from app.config import get_settings
 from app.services.docker_service import get_docker_service
+
+logger = logging.getLogger(__name__)
 
 
 class RestoreStep(str, Enum):
@@ -224,6 +227,7 @@ class RestoreService:
             return True
 
         except Exception as e:
+            logger.exception(f"Restore {job.id} failed: {e}")
             job.error = str(e)
             job.completed_at = datetime.now()
             await self._update_job(
@@ -248,6 +252,8 @@ class RestoreService:
         job.progress = progress
         job.message = message
 
+        logger.info(f"Restore {job.id}: [{progress}%] {step.value} - {message}")
+
         # Notify WebSocket listeners
         callback = self._progress_callbacks.get(job.id)
         if callback:
@@ -261,9 +267,8 @@ class RestoreService:
                         "error": job.error,
                     }
                 )
-            except Exception:
-                # Ignore callback errors
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to send WebSocket update: {e}")
 
     def register_progress_callback(
         self, job_id: str, callback: Callable[[dict], Awaitable[None]]
