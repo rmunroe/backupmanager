@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -41,9 +40,9 @@ async def initiate_restore(
             status_code=409, detail="A restore is already in progress for this server"
         )
 
-    # Start restore in background using asyncio.create_task
+    # Start restore in background thread (fire and forget)
     logger.info(f"Starting restore job {job.id} for {server_name}")
-    asyncio.create_task(restore_service.execute_restore(job.id))
+    restore_service.start_restore(job.id)
 
     return {"job_id": job.id, "status": "started"}
 

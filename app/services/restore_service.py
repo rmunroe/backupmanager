@@ -1,17 +1,26 @@
-import asyncio
 import uuid
 import shutil
 import tarfile
 import logging
+import threading
 from pathlib import Path
 from datetime import datetime
 from enum import Enum
 from typing import Dict
 from dataclasses import dataclass, field
 from app.config import get_settings
-from app.services.docker_service import get_docker_service
 
 logger = logging.getLogger(__name__)
+
+# Thread pool for background restore operations
+_restore_executor = None
+
+def get_restore_executor():
+    global _restore_executor
+    if _restore_executor is None:
+        from concurrent.futures import ThreadPoolExecutor
+        _restore_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="restore")
+    return _restore_executor
 
 
 class RestoreStep(str, Enum):
@@ -72,10 +81,10 @@ class RestoreService:
     def get_job(self, job_id: str) -> RestoreJob | None:
         return self.jobs.get(job_id)
 
-    async def execute_restore(self, job_id: str) -> bool:
-        """Execute restore operation in a background thread."""
-        # Run the entire restore in a thread to avoid blocking the event loop
-        return await asyncio.to_thread(self._execute_restore_sync, job_id)
+    def start_restore(self, job_id: str) -> None:
+        """Start restore operation in a background thread (fire and forget)."""
+        executor = get_restore_executor()
+        executor.submit(self._execute_restore_sync, job_id)
 
     def _execute_restore_sync(self, job_id: str) -> bool:
         """Execute restore operation synchronously (runs in thread)."""
