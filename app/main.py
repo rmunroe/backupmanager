@@ -1,4 +1,5 @@
 import logging
+import time
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
@@ -10,6 +11,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Minecraft Backup Manager")
 
@@ -26,17 +28,23 @@ app.include_router(restore.router)
 async def auth_middleware(request: Request, call_next):
     """Redirect to login if not authenticated (except for login page and static files)."""
     path = request.url.path
+    start_time = time.time()
+    logger.info(f"Request started: {request.method} {path}")
 
     # Allow login page, static files, health check, and API endpoints (which have their own auth)
     if path.startswith("/login") or path.startswith("/static") or path == "/health":
-        return await call_next(request)
+        response = await call_next(request)
+        logger.info(f"Request finished: {request.method} {path} - {time.time() - start_time:.2f}s")
+        return response
 
     # Check auth for HTML pages
     if not path.startswith("/api") and not path.startswith("/ws"):
         if not check_auth(request):
             return RedirectResponse(url="/login", status_code=302)
 
-    return await call_next(request)
+    response = await call_next(request)
+    logger.info(f"Request finished: {request.method} {path} - {time.time() - start_time:.2f}s")
+    return response
 
 
 @app.get("/health")
