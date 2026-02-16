@@ -116,15 +116,28 @@ async def restore_progress_ws(websocket: WebSocket, job_id: str):
     try:
         # Keep connection alive until job completes or client disconnects
         while True:
-            try:
-                # Wait for messages (ping/pong or close)
-                await websocket.receive_text()
-            except WebSocketDisconnect:
-                break
-
             # Check if job is done
             job = restore_service.get_job(job_id)
             if job and job.step in (RestoreStep.COMPLETED, RestoreStep.FAILED):
+                logger.info(f"WebSocket: Job {job_id} finished with step {job.step.value}")
+                # Send final status
+                await websocket.send_json({
+                    "job_id": job.id,
+                    "step": job.step.value,
+                    "progress": job.progress,
+                    "message": job.message,
+                    "error": job.error,
+                })
+                break
+
+            # Use asyncio.wait_for with timeout to check for client disconnect
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+            except asyncio.TimeoutError:
+                # No message from client, continue loop
+                pass
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket: Client disconnected for job {job_id}")
                 break
     finally:
         restore_service.unregister_progress_callback(job_id)
