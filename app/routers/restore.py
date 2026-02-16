@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks
+import asyncio
+import logging
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from app.auth import require_auth
 from app.services.server_service import get_server_service
 from app.services.backup_service import get_backup_service
 from app.services.restore_service import get_restore_service, RestoreStep
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -16,7 +19,6 @@ class RestoreRequest(BaseModel):
 async def initiate_restore(
     server_name: str,
     request: RestoreRequest,
-    background_tasks: BackgroundTasks,
     _=Depends(require_auth),
 ):
     """Initiate a backup restore."""
@@ -39,8 +41,9 @@ async def initiate_restore(
             status_code=409, detail="A restore is already in progress for this server"
         )
 
-    # Start restore in background
-    background_tasks.add_task(restore_service.execute_restore, job.id)
+    # Start restore in background using asyncio.create_task
+    logger.info(f"Starting restore job {job.id} for {server_name}")
+    asyncio.create_task(restore_service.execute_restore(job.id))
 
     return {"job_id": job.id, "status": "started"}
 
