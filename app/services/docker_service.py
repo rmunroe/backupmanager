@@ -75,6 +75,36 @@ class DockerService:
         status = self.get_container_status(name)
         return status.status == "running"
 
+    def wait_for_log_message(
+        self, name: str, pattern: str, timeout: int = 300, since_seconds: int = 0
+    ) -> tuple[bool, str]:
+        """
+        Wait for a specific pattern to appear in container logs.
+        Returns (found, message).
+        """
+        import re
+        import time
+
+        try:
+            container = self.client.containers.get(name)
+            start_time = time.time()
+            since_timestamp = start_time - since_seconds if since_seconds else start_time
+
+            while time.time() - start_time < timeout:
+                # Get logs since the container started (or since specified time)
+                logs = container.logs(since=int(since_timestamp), tail=100).decode("utf-8")
+
+                if re.search(pattern, logs):
+                    return True, "Pattern found in logs"
+
+                time.sleep(2)
+
+            return False, f"Timeout waiting for pattern after {timeout}s"
+        except NotFound:
+            return False, "Container not found"
+        except APIError as e:
+            return False, f"API error: {str(e)}"
+
 
 def get_docker_service() -> DockerService:
     return DockerService()

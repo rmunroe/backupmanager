@@ -17,6 +17,7 @@ class RestoreStep(str, Enum):
     CLEARING = "clearing"
     EXTRACTING = "extracting"
     STARTING = "starting"
+    WAITING_READY = "waiting_ready"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -173,7 +174,7 @@ class RestoreService:
             # Restart backup container if it was running
             if job.backup_container_was_running:
                 await self._update_job(
-                    job, RestoreStep.STARTING, 95, "Restarting backup container..."
+                    job, RestoreStep.STARTING, 93, "Restarting backup container..."
                 )
 
                 success, msg = await asyncio.get_event_loop().run_in_executor(
@@ -183,11 +184,36 @@ class RestoreService:
                 if not success:
                     # Non-fatal - just log it in the message
                     await self._update_job(
-                        job, RestoreStep.STARTING, 98, f"Warning: Could not restart backup container: {msg}"
+                        job, RestoreStep.STARTING, 94, f"Warning: Could not restart backup container: {msg}"
                     )
                 else:
                     await self._update_job(
-                        job, RestoreStep.STARTING, 98, "Backup container restarted"
+                        job, RestoreStep.STARTING, 94, "Backup container restarted"
+                    )
+
+            # Step 5: Wait for Minecraft to be ready (if server was running)
+            if job.container_was_running:
+                await self._update_job(
+                    job, RestoreStep.WAITING_READY, 95, "Waiting for Minecraft server to start..."
+                )
+
+                # Wait for "Done (XXs)! For help, type" message in logs
+                ready_pattern = r'Done \([0-9.]+s\)! For help'
+                found, msg = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self.docker.wait_for_log_message(
+                        job.server_name, ready_pattern, timeout=300, since_seconds=10
+                    )
+                )
+
+                if found:
+                    await self._update_job(
+                        job, RestoreStep.WAITING_READY, 99, "Minecraft server is ready! Players can join."
+                    )
+                else:
+                    # Non-fatal - server might still be starting
+                    await self._update_job(
+                        job, RestoreStep.WAITING_READY, 99, "Server started (ready check timed out - may still be loading)"
                     )
 
             # Complete
