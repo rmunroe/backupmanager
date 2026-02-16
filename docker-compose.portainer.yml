@@ -9,8 +9,7 @@
 
 services:
   backupmanager:
-    # UPDATE: Replace YOUR_GITHUB_USERNAME with your actual GitHub username
-    image: ghcr.io/YOUR_GITHUB_USERNAME/backupmanager:latest
+    image: ghcr.io/rmunroe/backupmanager:latest
     container_name: backupmanager
     restart: unless-stopped
     ports:
