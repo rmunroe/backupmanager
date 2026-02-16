@@ -52,3 +52,8 @@ jobs:
             BUILD_VERSION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Trigger Portainer webhook
+        if: github.event_name != 'pull_request'
+        run: |
+          curl -X POST "${{ secrets.PORTAINER_WEBHOOK_URL }}" || true
