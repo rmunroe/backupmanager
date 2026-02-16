@@ -73,7 +73,12 @@ class RestoreService:
         return self.jobs.get(job_id)
 
     async def execute_restore(self, job_id: str) -> bool:
-        """Execute restore operation asynchronously."""
+        """Execute restore operation in a background thread."""
+        # Run the entire restore in a thread to avoid blocking the event loop
+        return await asyncio.to_thread(self._execute_restore_sync, job_id)
+
+    def _execute_restore_sync(self, job_id: str) -> bool:
+        """Execute restore operation synchronously (runs in thread)."""
         print(f"[RESTORE] Starting execute_restore for job {job_id}", flush=True)
         job = self.jobs.get(job_id)
         if not job:
@@ -86,6 +91,10 @@ class RestoreService:
 
         print(f"[RESTORE] Job {job_id}: server={job.server_name}, backup={backup_path}", flush=True)
 
+        # Create a fresh Docker client for this thread
+        import docker
+        docker_client = docker.from_env()
+
         try:
             # Step 1: Check container status
             self._update_job(
@@ -94,12 +103,8 @@ class RestoreService:
 
             backup_container_name = f"{job.server_name}-backup"
 
-            is_running = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self.docker.is_running(job.server_name)
-            )
-            backup_is_running = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self.docker.is_running(backup_container_name)
-            )
+            is_running = self._is_container_running(docker_client, job.server_name)
+            backup_is_running = self._is_container_running(docker_client, backup_container_name)
 
             if is_running:
                 job.container_was_running = True
@@ -107,12 +112,11 @@ class RestoreService:
                     job, RestoreStep.STOPPING, 10, "Stopping server container..."
                 )
 
-                success, msg = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self.docker.stop_container(job.server_name, timeout=60)
-                )
-
-                if not success:
-                    raise Exception(f"Failed to stop container: {msg}")
+                try:
+                    container = docker_client.containers.get(job.server_name)
+                    container.stop(timeout=60)
+                except Exception as e:
+                    raise Exception(f"Failed to stop container: {e}")
 
                 self._update_job(
                     job, RestoreStep.STOPPING, 20, "Server container stopped"
@@ -131,13 +135,8 @@ class RestoreService:
                 job, RestoreStep.CLEARING, 30, "Removing old data..."
             )
 
-            await asyncio.get_event_loop().run_in_executor(
-                None, lambda: shutil.rmtree(data_dir, ignore_errors=True)
-            )
-
-            await asyncio.get_event_loop().run_in_executor(
-                None, lambda: data_dir.mkdir(parents=True, exist_ok=True)
-            )
+            shutil.rmtree(data_dir, ignore_errors=True)
+            data_dir.mkdir(parents=True, exist_ok=True)
 
             self._update_job(
                 job, RestoreStep.CLEARING, 40, "Data directory cleared"
@@ -148,9 +147,7 @@ class RestoreService:
                 job, RestoreStep.EXTRACTING, 45, "Extracting backup..."
             )
 
-            await asyncio.get_event_loop().run_in_executor(
-                None, lambda: self._extract_backup(backup_path, data_dir)
-            )
+            self._extract_backup(backup_path, data_dir)
 
             self._update_job(
                 job, RestoreStep.EXTRACTING, 85, "Backup extracted"
@@ -162,12 +159,11 @@ class RestoreService:
                     job, RestoreStep.STARTING, 87, "Starting server container..."
                 )
 
-                success, msg = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self.docker.start_container(job.server_name)
-                )
-
-                if not success:
-                    raise Exception(f"Failed to start container: {msg}")
+                try:
+                    container = docker_client.containers.get(job.server_name)
+                    container.start()
+                except Exception as e:
+                    raise Exception(f"Failed to start container: {e}")
 
                 self._update_job(
                     job, RestoreStep.STARTING, 92, "Server container started"
@@ -183,18 +179,16 @@ class RestoreService:
                     job, RestoreStep.STARTING, 93, "Restarting backup container..."
                 )
 
-                success, msg = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self.docker.restart_container(backup_container_name)
-                )
-
-                if not success:
-                    # Non-fatal - just log it in the message
-                    self._update_job(
-                        job, RestoreStep.STARTING, 94, f"Warning: Could not restart backup container: {msg}"
-                    )
-                else:
+                try:
+                    container = docker_client.containers.get(backup_container_name)
+                    container.restart(timeout=30)
                     self._update_job(
                         job, RestoreStep.STARTING, 94, "Backup container restarted"
+                    )
+                except Exception as e:
+                    # Non-fatal
+                    self._update_job(
+                        job, RestoreStep.STARTING, 94, f"Warning: Could not restart backup container: {e}"
                     )
 
             # Step 5: Wait for Minecraft to be ready (if server was running)
@@ -204,20 +198,31 @@ class RestoreService:
                 )
 
                 # Wait for "Done (XXs)! For help, type" message in logs
+                import re
+                import time
                 ready_pattern = r'Done \([0-9.]+s\)! For help'
-                found, msg = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self.docker.wait_for_log_message(
-                        job.server_name, ready_pattern, timeout=300, since_seconds=10
-                    )
-                )
+                timeout = 300
+                start_time = time.time()
+                found = False
+
+                try:
+                    container = docker_client.containers.get(job.server_name)
+                    since_timestamp = int(start_time) - 10
+
+                    while time.time() - start_time < timeout:
+                        logs = container.logs(since=since_timestamp, tail=100).decode("utf-8")
+                        if re.search(ready_pattern, logs):
+                            found = True
+                            break
+                        time.sleep(2)
+                except Exception as e:
+                    logger.warning(f"Error checking logs: {e}")
 
                 if found:
                     self._update_job(
                         job, RestoreStep.WAITING_READY, 99, "Minecraft server is ready! Players can join."
                     )
                 else:
-                    # Non-fatal - server might still be starting
                     self._update_job(
                         job, RestoreStep.WAITING_READY, 99, "Server started (ready check timed out - may still be loading)"
                     )
@@ -241,6 +246,14 @@ class RestoreService:
             # Clean up active restore tracking
             if self._active_restores.get(job.server_name) == job_id:
                 del self._active_restores[job.server_name]
+
+    def _is_container_running(self, client, name: str) -> bool:
+        """Check if container is running."""
+        try:
+            container = client.containers.get(name)
+            return container.status == "running"
+        except Exception:
+            return False
 
     def _extract_backup(self, backup_path: Path, data_dir: Path):
         """Extract tarball to data directory."""
