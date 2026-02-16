@@ -74,13 +74,17 @@ async def get_restore_status(job_id: str, _=Depends(require_auth)):
 async def restore_progress_ws(websocket: WebSocket, job_id: str):
     """WebSocket endpoint for real-time restore progress."""
     await websocket.accept()
+    logger.info(f"WebSocket connected for job {job_id}")
 
     restore_service = get_restore_service()
     job = restore_service.get_job(job_id)
 
     if not job:
+        logger.warning(f"WebSocket: Job {job_id} not found")
         await websocket.close(code=4004, reason="Job not found")
         return
+
+    logger.info(f"WebSocket: Job {job_id} found, current step: {job.step.value}")
 
     # Send current status immediately
     await websocket.send_json(
@@ -100,12 +104,14 @@ async def restore_progress_ws(websocket: WebSocket, job_id: str):
 
     # Register callback for progress updates
     async def send_progress(data: dict):
+        logger.info(f"WebSocket callback sending: {data}")
         try:
             await websocket.send_json(data)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"WebSocket callback failed: {e}")
 
     restore_service.register_progress_callback(job_id, send_progress)
+    logger.info(f"WebSocket: Registered callback for job {job_id}")
 
     try:
         # Keep connection alive until job completes or client disconnects

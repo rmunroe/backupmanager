@@ -260,8 +260,10 @@ class RestoreService:
 
         # Notify WebSocket listeners
         callback = self._progress_callbacks.get(job.id)
+        logger.debug(f"Restore {job.id}: callback registered = {callback is not None}, callbacks = {list(self._progress_callbacks.keys())}")
         if callback:
             try:
+                logger.info(f"Restore {job.id}: Sending WebSocket update")
                 await callback(
                     {
                         "job_id": job.id,
@@ -271,6 +273,7 @@ class RestoreService:
                         "error": job.error,
                     }
                 )
+                logger.info(f"Restore {job.id}: WebSocket update sent")
             except Exception as e:
                 logger.warning(f"Failed to send WebSocket update: {e}")
 
