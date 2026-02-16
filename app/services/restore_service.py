@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Callable, Awaitable
+from typing import Dict
 from dataclasses import dataclass, field
 from app.config import get_settings
 from app.services.docker_service import get_docker_service
@@ -46,7 +46,6 @@ class RestoreService:
         self.base_path = Path(base_path or settings.servers_base_path)
         self.docker = get_docker_service()
         self.jobs: Dict[str, RestoreJob] = {}
-        self._progress_callbacks: Dict[str, Callable[[dict], Awaitable[None]]] = {}
         self._active_restores: Dict[str, str] = {}  # server_name -> job_id
 
     def create_job(self, server_name: str, backup_file: str) -> RestoreJob | None:
@@ -89,7 +88,7 @@ class RestoreService:
 
         try:
             # Step 1: Check container status
-            await self._update_job(
+            self._update_job(
                 job, RestoreStep.STOPPING, 5, "Checking container status..."
             )
 
@@ -104,7 +103,7 @@ class RestoreService:
 
             if is_running:
                 job.container_was_running = True
-                await self._update_job(
+                self._update_job(
                     job, RestoreStep.STOPPING, 10, "Stopping server container..."
                 )
 
@@ -115,12 +114,12 @@ class RestoreService:
                 if not success:
                     raise Exception(f"Failed to stop container: {msg}")
 
-                await self._update_job(
+                self._update_job(
                     job, RestoreStep.STOPPING, 20, "Server container stopped"
                 )
             else:
                 job.container_was_running = False
-                await self._update_job(
+                self._update_job(
                     job, RestoreStep.STOPPING, 20, "Server container not running"
                 )
 
@@ -128,7 +127,7 @@ class RestoreService:
             job.backup_container_was_running = backup_is_running
 
             # Step 2: Clear data directory
-            await self._update_job(
+            self._update_job(
                 job, RestoreStep.CLEARING, 30, "Removing old data..."
             )
 
@@ -140,12 +139,12 @@ class RestoreService:
                 None, lambda: data_dir.mkdir(parents=True, exist_ok=True)
             )
 
-            await self._update_job(
+            self._update_job(
                 job, RestoreStep.CLEARING, 40, "Data directory cleared"
             )
 
             # Step 3: Extract backup
-            await self._update_job(
+            self._update_job(
                 job, RestoreStep.EXTRACTING, 45, "Extracting backup..."
             )
 
@@ -153,13 +152,13 @@ class RestoreService:
                 None, lambda: self._extract_backup(backup_path, data_dir)
             )
 
-            await self._update_job(
+            self._update_job(
                 job, RestoreStep.EXTRACTING, 85, "Backup extracted"
             )
 
             # Step 4: Restart containers if they were running
             if job.container_was_running:
-                await self._update_job(
+                self._update_job(
                     job, RestoreStep.STARTING, 87, "Starting server container..."
                 )
 
@@ -170,17 +169,17 @@ class RestoreService:
                 if not success:
                     raise Exception(f"Failed to start container: {msg}")
 
-                await self._update_job(
+                self._update_job(
                     job, RestoreStep.STARTING, 92, "Server container started"
                 )
             else:
-                await self._update_job(
+                self._update_job(
                     job, RestoreStep.STARTING, 92, "Server container left stopped (was not running before)"
                 )
 
             # Restart backup container if it was running
             if job.backup_container_was_running:
-                await self._update_job(
+                self._update_job(
                     job, RestoreStep.STARTING, 93, "Restarting backup container..."
                 )
 
@@ -190,17 +189,17 @@ class RestoreService:
 
                 if not success:
                     # Non-fatal - just log it in the message
-                    await self._update_job(
+                    self._update_job(
                         job, RestoreStep.STARTING, 94, f"Warning: Could not restart backup container: {msg}"
                     )
                 else:
-                    await self._update_job(
+                    self._update_job(
                         job, RestoreStep.STARTING, 94, "Backup container restarted"
                     )
 
             # Step 5: Wait for Minecraft to be ready (if server was running)
             if job.container_was_running:
-                await self._update_job(
+                self._update_job(
                     job, RestoreStep.WAITING_READY, 95, "Waiting for Minecraft server to start..."
                 )
 
@@ -214,18 +213,18 @@ class RestoreService:
                 )
 
                 if found:
-                    await self._update_job(
+                    self._update_job(
                         job, RestoreStep.WAITING_READY, 99, "Minecraft server is ready! Players can join."
                     )
                 else:
                     # Non-fatal - server might still be starting
-                    await self._update_job(
+                    self._update_job(
                         job, RestoreStep.WAITING_READY, 99, "Server started (ready check timed out - may still be loading)"
                     )
 
             # Complete
             job.completed_at = datetime.now()
-            await self._update_job(
+            self._update_job(
                 job, RestoreStep.COMPLETED, 100, "Restore completed successfully!"
             )
             return True
@@ -234,7 +233,7 @@ class RestoreService:
             logger.exception(f"Restore {job.id} failed: {e}")
             job.error = str(e)
             job.completed_at = datetime.now()
-            await self._update_job(
+            self._update_job(
                 job, RestoreStep.FAILED, job.progress, f"Error: {str(e)}"
             )
             return False
@@ -248,42 +247,14 @@ class RestoreService:
         with tarfile.open(backup_path, "r:gz") as tar:
             tar.extractall(path=data_dir)
 
-    async def _update_job(
+    def _update_job(
         self, job: RestoreJob, step: RestoreStep, progress: int, message: str
     ):
-        """Update job status and notify listeners."""
+        """Update job status."""
         job.step = step
         job.progress = progress
         job.message = message
-
         logger.info(f"Restore {job.id}: [{progress}%] {step.value} - {message}")
-
-        # Notify WebSocket listeners
-        callback = self._progress_callbacks.get(job.id)
-        logger.debug(f"Restore {job.id}: callback registered = {callback is not None}, callbacks = {list(self._progress_callbacks.keys())}")
-        if callback:
-            try:
-                logger.info(f"Restore {job.id}: Sending WebSocket update")
-                await callback(
-                    {
-                        "job_id": job.id,
-                        "step": step.value,
-                        "progress": progress,
-                        "message": message,
-                        "error": job.error,
-                    }
-                )
-                logger.info(f"Restore {job.id}: WebSocket update sent")
-            except Exception as e:
-                logger.warning(f"Failed to send WebSocket update: {e}")
-
-    def register_progress_callback(
-        self, job_id: str, callback: Callable[[dict], Awaitable[None]]
-    ):
-        self._progress_callbacks[job_id] = callback
-
-    def unregister_progress_callback(self, job_id: str):
-        self._progress_callbacks.pop(job_id, None)
 
 
 # Singleton instance

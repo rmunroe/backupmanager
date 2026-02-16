@@ -1,11 +1,11 @@
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from app.auth import require_auth
 from app.services.server_service import get_server_service
 from app.services.backup_service import get_backup_service
-from app.services.restore_service import get_restore_service, RestoreStep
+from app.services.restore_service import get_restore_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -68,80 +68,3 @@ async def get_restore_status(job_id: str, _=Depends(require_auth)):
         "started_at": job.started_at.isoformat(),
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
     }
-
-
-@router.websocket("/ws/restore/{job_id}")
-async def restore_progress_ws(websocket: WebSocket, job_id: str):
-    """WebSocket endpoint for real-time restore progress."""
-    await websocket.accept()
-    logger.info(f"WebSocket connected for job {job_id}")
-
-    restore_service = get_restore_service()
-    job = restore_service.get_job(job_id)
-
-    if not job:
-        logger.warning(f"WebSocket: Job {job_id} not found")
-        await websocket.close(code=4004, reason="Job not found")
-        return
-
-    logger.info(f"WebSocket: Job {job_id} found, current step: {job.step.value}")
-
-    # Send current status immediately
-    await websocket.send_json(
-        {
-            "job_id": job.id,
-            "step": job.step.value,
-            "progress": job.progress,
-            "message": job.message,
-            "error": job.error,
-        }
-    )
-
-    # If already complete, close the connection
-    if job.step in (RestoreStep.COMPLETED, RestoreStep.FAILED):
-        await websocket.close()
-        return
-
-    # Register callback for progress updates
-    async def send_progress(data: dict):
-        logger.info(f"WebSocket callback sending: {data}")
-        try:
-            await websocket.send_json(data)
-        except Exception as e:
-            logger.warning(f"WebSocket callback failed: {e}")
-
-    restore_service.register_progress_callback(job_id, send_progress)
-    logger.info(f"WebSocket: Registered callback for job {job_id}")
-
-    try:
-        # Keep connection alive until job completes or client disconnects
-        while True:
-            # Check if job is done
-            job = restore_service.get_job(job_id)
-            if job and job.step in (RestoreStep.COMPLETED, RestoreStep.FAILED):
-                logger.info(f"WebSocket: Job {job_id} finished with step {job.step.value}")
-                # Send final status
-                await websocket.send_json({
-                    "job_id": job.id,
-                    "step": job.step.value,
-                    "progress": job.progress,
-                    "message": job.message,
-                    "error": job.error,
-                })
-                break
-
-            # Use asyncio.wait_for with timeout to check for client disconnect
-            try:
-                await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
-            except asyncio.TimeoutError:
-                # No message from client, continue loop
-                pass
-            except WebSocketDisconnect:
-                logger.info(f"WebSocket: Client disconnected for job {job_id}")
-                break
-    finally:
-        restore_service.unregister_progress_callback(job_id)
-        try:
-            await websocket.close()
-        except Exception:
-            pass

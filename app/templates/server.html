@@ -151,54 +151,8 @@ async function executeRestore() {
             throw new Error(data.detail || 'Failed to start restore');
         }
 
-        const job_id = data.job_id;
-
-        // Connect to WebSocket for progress updates
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/restore/${job_id}`);
-
-        ws.onopen = () => {
-            console.log('[WS] Connected to', job_id);
-        };
-
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            console.log('[WS] Received:', data);
-            progressBar.value = data.progress;
-            progressMessage.textContent = data.message;
-
-            if (data.step === 'completed') {
-                console.log('[WS] Restore completed');
-                progressContent.style.display = 'none';
-                progressResult.style.display = 'block';
-                resultMessage.innerHTML = '<span class="success">Restore completed successfully!</span>';
-                progressFooter.style.display = 'block';
-                ws.close();
-            } else if (data.step === 'failed') {
-                console.log('[WS] Restore failed');
-                progressContent.style.display = 'none';
-                progressResult.style.display = 'block';
-                resultMessage.innerHTML = `<span class="error">Restore failed: ${data.error || data.message}</span>`;
-                progressFooter.style.display = 'block';
-                ws.close();
-            }
-        };
-
-        ws.onerror = (err) => {
-            console.log('[WS] Error:', err);
-            // Fall back to polling
-            pollStatus(job_id);
-        };
-
-        ws.onclose = (event) => {
-            console.log('[WS] Closed:', event.code, event.reason);
-            // If not completed, start polling
-            const currentProgress = progressBar.value;
-            if (currentProgress < 100 && progressContent.style.display !== 'none') {
-                console.log('[WS] Starting polling fallback');
-                pollStatus(job_id);
-            }
-        };
+        // Poll for status updates
+        pollStatus(data.job_id);
 
     } catch (err) {
         progressContent.style.display = 'none';
