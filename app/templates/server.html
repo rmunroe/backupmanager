@@ -143,12 +143,13 @@ async function executeRestore() {
             body: JSON.stringify({ backup: selectedBackup })
         });
 
+        const data = await response.json();
+
         if (!response.ok) {
-            const data = await response.json();
             throw new Error(data.detail || 'Failed to start restore');
         }
 
-        const { job_id } = await response.json();
+        const job_id = data.job_id;
 
         // Connect to WebSocket for progress updates
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
