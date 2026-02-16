@@ -2,12 +2,16 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from app.auth import require_auth
+from app.config import get_settings
 from app.services.server_service import get_server_service
 from app.services.backup_service import get_backup_service
 from app.services.docker_service import get_docker_service
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+
+# Add version to template globals
+templates.env.globals["app_version"] = get_settings().app_version
 
 
 @router.get("/", response_class=HTMLResponse)

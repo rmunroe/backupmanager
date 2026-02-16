@@ -29,7 +29,7 @@
     </main>
 
     <footer class="container">
-        <small>Minecraft Backup Manager</small>
+        <small>Minecraft Backup Manager <span class="version">{{ app_version[:7] if app_version != 'dev' else 'dev' }}</span></small>
     </footer>
 
     <script src="/static/app.js"></script>
