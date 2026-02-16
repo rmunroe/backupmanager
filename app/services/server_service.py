@@ -34,7 +34,7 @@ class ServerService:
                     servers.append(entry.name)
         return sorted(servers)
 
-    def get_server_info(self, name: str) -> ServerInfo | None:
+    async def get_server_info(self, name: str) -> ServerInfo | None:
         """Get detailed info about a specific server."""
         if not self.is_valid_server(name):
             return None
@@ -48,8 +48,8 @@ class ServerService:
             for f in backups_path.iterdir()
         ) if backups_path.exists() else False
 
-        # Get container status
-        container_status = self.docker.get_container_status(name)
+        # Get container status (async to avoid blocking)
+        container_status = await self.docker.get_container_status_async(name)
 
         return ServerInfo(
             name=name,
@@ -59,11 +59,11 @@ class ServerService:
             has_backups=has_backups,
         )
 
-    def get_all_servers(self) -> List[ServerInfo]:
+    async def get_all_servers(self) -> List[ServerInfo]:
         """Get info for all discovered servers."""
         servers = []
         for name in self.discover_servers():
-            info = self.get_server_info(name)
+            info = await self.get_server_info(name)
             if info:
                 servers.append(info)
         return servers
@@ -77,5 +77,11 @@ class ServerService:
         return name in self.discover_servers()
 
 
+_server_service: ServerService | None = None
+
+
 def get_server_service() -> ServerService:
-    return ServerService()
+    global _server_service
+    if _server_service is None:
+        _server_service = ServerService()
+    return _server_service

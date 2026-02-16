@@ -9,8 +9,7 @@ class Settings(BaseSettings):
     session_max_age: int = 86400  # 24 hours
     app_version: str = "dev"
 
-    class Config:
-        env_file = ".env"
+    model_config = {"env_file": ".env"}
 
 
 @lru_cache

@@ -1,6 +1,6 @@
+import asyncio
 import docker
 from docker.errors import NotFound, APIError
-from typing import Optional
 from dataclasses import dataclass
 
 
@@ -75,6 +75,27 @@ class DockerService:
         status = self.get_container_status(name)
         return status.status == "running"
 
+    # Async wrappers for non-blocking calls
+    async def get_container_status_async(self, name: str) -> ContainerStatus:
+        """Async wrapper for get_container_status."""
+        return await asyncio.to_thread(self.get_container_status, name)
+
+    async def stop_container_async(self, name: str, timeout: int = 60) -> tuple[bool, str]:
+        """Async wrapper for stop_container."""
+        return await asyncio.to_thread(self.stop_container, name, timeout)
+
+    async def start_container_async(self, name: str) -> tuple[bool, str]:
+        """Async wrapper for start_container."""
+        return await asyncio.to_thread(self.start_container, name)
+
+    async def restart_container_async(self, name: str, timeout: int = 30) -> tuple[bool, str]:
+        """Async wrapper for restart_container."""
+        return await asyncio.to_thread(self.restart_container, name, timeout)
+
+    async def is_running_async(self, name: str) -> bool:
+        """Async wrapper for is_running."""
+        return await asyncio.to_thread(self.is_running, name)
+
     def wait_for_log_message(
         self, name: str, pattern: str, timeout: int = 300, since_seconds: int = 0
     ) -> tuple[bool, str]:
@@ -106,5 +127,11 @@ class DockerService:
             return False, f"API error: {str(e)}"
 
 
+_docker_service: DockerService | None = None
+
+
 def get_docker_service() -> DockerService:
-    return DockerService()
+    global _docker_service
+    if _docker_service is None:
+        _docker_service = DockerService()
+    return _docker_service

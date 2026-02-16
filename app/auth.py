@@ -25,8 +25,14 @@ class AuthManager:
             return False
 
 
+_auth_manager: AuthManager | None = None
+
+
 def get_auth_manager() -> AuthManager:
-    return AuthManager()
+    global _auth_manager
+    if _auth_manager is None:
+        _auth_manager = AuthManager()
+    return _auth_manager
 
 
 async def require_auth(request: Request):

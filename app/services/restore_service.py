@@ -1,8 +1,11 @@
-import uuid
+import docker
+import logging
+import re
 import shutil
 import tarfile
-import logging
 import threading
+import time
+import uuid
 from pathlib import Path
 from datetime import datetime
 from enum import Enum
@@ -55,30 +58,33 @@ class RestoreService:
         self.base_path = Path(base_path or settings.servers_base_path)
         self.jobs: Dict[str, RestoreJob] = {}
         self._active_restores: Dict[str, str] = {}  # server_name -> job_id
+        self._lock = threading.Lock()
 
     def create_job(self, server_name: str, backup_file: str) -> RestoreJob | None:
         """Create a new restore job. Returns None if restore already in progress."""
-        # Check for active restore on this server
-        if server_name in self._active_restores:
-            existing_job = self.jobs.get(self._active_restores[server_name])
-            if existing_job and existing_job.step not in (
-                RestoreStep.COMPLETED,
-                RestoreStep.FAILED,
-            ):
-                return None
+        with self._lock:
+            # Check for active restore on this server
+            if server_name in self._active_restores:
+                existing_job = self.jobs.get(self._active_restores[server_name])
+                if existing_job and existing_job.step not in (
+                    RestoreStep.COMPLETED,
+                    RestoreStep.FAILED,
+                ):
+                    return None
 
-        job_id = str(uuid.uuid4())[:8]
-        job = RestoreJob(
-            id=job_id,
-            server_name=server_name,
-            backup_file=backup_file,
-        )
-        self.jobs[job_id] = job
-        self._active_restores[server_name] = job_id
-        return job
+            job_id = str(uuid.uuid4())[:8]
+            job = RestoreJob(
+                id=job_id,
+                server_name=server_name,
+                backup_file=backup_file,
+            )
+            self.jobs[job_id] = job
+            self._active_restores[server_name] = job_id
+            return job
 
     def get_job(self, job_id: str) -> RestoreJob | None:
-        return self.jobs.get(job_id)
+        with self._lock:
+            return self.jobs.get(job_id)
 
     def start_restore(self, job_id: str) -> None:
         """Start restore operation in a background thread (fire and forget)."""
@@ -87,20 +93,19 @@ class RestoreService:
 
     def _execute_restore_sync(self, job_id: str) -> bool:
         """Execute restore operation synchronously (runs in thread)."""
-        print(f"[RESTORE] Starting execute_restore for job {job_id}", flush=True)
+        logger.info(f"Starting restore for job {job_id}")
         job = self.jobs.get(job_id)
         if not job:
-            print(f"[RESTORE] Job {job_id} not found!", flush=True)
+            logger.error(f"Job {job_id} not found!")
             return False
 
         server_path = self.base_path / job.server_name
         data_dir = server_path / "data"
         backup_path = server_path / "backups" / job.backup_file
 
-        print(f"[RESTORE] Job {job_id}: server={job.server_name}, backup={backup_path}", flush=True)
+        logger.info(f"Job {job_id}: server={job.server_name}, backup={backup_path}")
 
         # Create a fresh Docker client for this thread
-        import docker
         docker_client = docker.from_env()
 
         try:
@@ -206,8 +211,6 @@ class RestoreService:
                 )
 
                 # Wait for "Done (XXs)! For help, type" message in logs
-                import re
-                import time
                 ready_pattern = r'Done \([0-9.]+s\)! For help'
                 timeout = 300
                 start_time = time.time()
@@ -252,8 +255,9 @@ class RestoreService:
             return False
         finally:
             # Clean up active restore tracking
-            if self._active_restores.get(job.server_name) == job_id:
-                del self._active_restores[job.server_name]
+            with self._lock:
+                if self._active_restores.get(job.server_name) == job_id:
+                    del self._active_restores[job.server_name]
 
     def _is_container_running(self, client, name: str) -> bool:
         """Check if container is running."""
@@ -266,15 +270,16 @@ class RestoreService:
     def _extract_backup(self, backup_path: Path, data_dir: Path):
         """Extract tarball to data directory."""
         with tarfile.open(backup_path, "r:gz") as tar:
-            tar.extractall(path=data_dir)
+            tar.extractall(path=data_dir, filter="data")
 
     def _update_job(
         self, job: RestoreJob, step: RestoreStep, progress: int, message: str
     ):
         """Update job status."""
-        job.step = step
-        job.progress = progress
-        job.message = message
+        with self._lock:
+            job.step = step
+            job.progress = progress
+            job.message = message
         logger.info(f"Restore {job.id}: [{progress}%] {step.value} - {message}")
 
 

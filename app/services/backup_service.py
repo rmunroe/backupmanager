@@ -88,5 +88,11 @@ class BackupService:
         return f"{size:.1f} TB"
 
 
+_backup_service: BackupService | None = None
+
+
 def get_backup_service() -> BackupService:
-    return BackupService()
+    global _backup_service
+    if _backup_service is None:
+        _backup_service = BackupService()
+    return _backup_service

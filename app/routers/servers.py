@@ -18,7 +18,7 @@ templates.env.globals["app_version"] = get_settings().app_version
 async def dashboard(request: Request, _=Depends(require_auth)):
     """Main dashboard showing all servers."""
     server_service = get_server_service()
-    servers = server_service.get_all_servers()
+    servers = await server_service.get_all_servers()
 
     return templates.TemplateResponse(
         "index.html",
@@ -32,7 +32,7 @@ async def server_detail(request: Request, server_name: str, _=Depends(require_au
     server_service = get_server_service()
     backup_service = get_backup_service()
 
-    server = server_service.get_server_info(server_name)
+    server = await server_service.get_server_info(server_name)
     if not server:
         raise HTTPException(status_code=404, detail="Server not found")
 
@@ -53,7 +53,7 @@ async def start_server(server_name: str, _=Depends(require_auth)):
     if not server_service.is_valid_server(server_name):
         raise HTTPException(status_code=404, detail="Server not found")
 
-    success, message = docker_service.start_container(server_name)
+    success, message = await docker_service.start_container_async(server_name)
 
     if success:
         return {"status": "ok", "message": message}
@@ -70,7 +70,7 @@ async def stop_server(server_name: str, _=Depends(require_auth)):
     if not server_service.is_valid_server(server_name):
         raise HTTPException(status_code=404, detail="Server not found")
 
-    success, message = docker_service.stop_container(server_name)
+    success, message = await docker_service.stop_container_async(server_name)
 
     if success:
         return {"status": "ok", "message": message}
@@ -87,6 +87,6 @@ async def server_status(server_name: str, _=Depends(require_auth)):
     if not server_service.is_valid_server(server_name):
         raise HTTPException(status_code=404, detail="Server not found")
 
-    status = docker_service.get_container_status(server_name)
+    status = await docker_service.get_container_status_async(server_name)
 
     return {"name": server_name, "status": status.status, "exists": status.exists}
