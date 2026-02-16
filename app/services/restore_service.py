@@ -53,7 +53,6 @@ class RestoreService:
     def __init__(self, base_path: str | None = None):
         settings = get_settings()
         self.base_path = Path(base_path or settings.servers_base_path)
-        self.docker = get_docker_service()
         self.jobs: Dict[str, RestoreJob] = {}
         self._active_restores: Dict[str, str] = {}  # server_name -> job_id
 
